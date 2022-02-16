@@ -12,7 +12,7 @@
 
 ## 这机器人好用不
 - Telegram bot api 只支持 20M 以内文件的传输
-- Telegram bot api 的 getupdates 还没整明白，所以机器人运行一段时间没反应了得手动 getupdates 一下
+- Telegram bot api 的轮询机制还没整明白，所以机器人运行一段时间没反应了得手动 getupdates 一下
 - 水印位置的选项还没来得及写
 - 以上除了 20M 限制以外的毛病，等我整明白了第一时间修复
 
