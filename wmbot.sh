@@ -225,7 +225,7 @@ do
     firstid=$(echo "$updt" | jq -r ".|.result|.[0]|.update_id")
     totalmsg=$((lastid - firstid))
     offset=$((lastid - 10))
-    if [ "$totalmsg" -gt 99 ]; then
+    if [ "$totalmsg" -ge 99 ]; then
         curl -s https://api.telegram.org/bot$bot_token/getupdates?offset=$offset
         echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] 已清空获取的聊天信息" >> $dir/wmbot.log
 
