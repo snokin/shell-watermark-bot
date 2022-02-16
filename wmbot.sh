@@ -1,6 +1,6 @@
 #!/bin/bash
-bot_token="5183343706:AAHwxU80eHDJtQWBeuiSJwZdKYv6dgLMm64"
-dir="/mnt/wdmc/watermarkbot"
+bot_token="<bot_token>"
+dir="/your/path/to/dir"
 
 #对用户发送消息
 function sendtext(){
@@ -186,7 +186,7 @@ do
     firstid=$(echo "$updt" | jq -r ".|.result|.[0]|.update_id")
     totalmsg=$((lastid - firstid))
     offset=$((lastid - 10))
-    if [ "$totalmsg" -eq 100 ]; then
+    if [ "$totalmsg" -ge 99 ]; then
         curl -s https://api.telegram.org/bot$bot_token/getupdates?offset=$offset
     fi
 
