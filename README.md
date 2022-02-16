@@ -19,9 +19,10 @@
 - 除此外，非常好用，加个水印还是挺快的
 
 ## 新更新
-- 增加了 admin 权限，必要动态将发送给 admin 的账号上。设置请在文件头部 `admin_id=` 处填写自己的 chat_id
+- 增加了 admin 用户权限，运行中必要动态将发送给 admin 的账号上。设置请在文件头部 `admin_id=` 处填写自己的 chat_id
 - 丰富了一些 log 记录的细节
 - 丰富了一些互动相关内容
+- 给机器人发送 `/totalmsg` 可以查看目前轮询消息总数
 
 ## 预览
 - https://t.me/lightrekt_wmbot
