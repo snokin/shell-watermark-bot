@@ -1,6 +1,6 @@
 #!/bin/bash
-bot_token="<bot_token>"
-dir="/your/path/to/dir"
+bot_token="5183343706:AAHwxU80eHDJtQWBeuiSJwZdKYv6dgLMm64"
+dir="/mnt/wdmc/watermarkbot"
 
 #对用户发送消息
 function sendtext(){
@@ -94,8 +94,8 @@ function compress(){
 	# 压缩主命令
     ffmpeg -i "$dir/$chat_id/$filename" \
     -i $wmark \
-    -filter_complex "[1][0]scale2ref=w='iw*40/100':h='ow/mdar'[wm][vid]; \
-    [vid][wm]overlay=W/10:H/10:format=auto,format=yuv420p" \
+    -filter_complex "[1][0]scale2ref=w='iw*30/100':h='ow/mdar'[vid][wm]; \
+    [wm][vid]overlay=W/11:H/12:format=auto,format=yuv420p" \
     -c:a copy \
     "$dir/$chat_id/watermarked/$filename"
     echo "转换完毕，现在要发回去了"
@@ -117,7 +117,7 @@ function compress(){
 		fi
 	fi
 
-    stext="转换完了，我亲爱的大爷！累死个我了……马上发给你，请稍等哦……"
+    stext="终于转换完了，我亲爱的大爷！累死个我了🥵 视频马上发给你，请稍等哦……"
     sendtext
 
 	# 发送视频主命令
@@ -126,15 +126,15 @@ function compress(){
     -F width="$width" \
     -F height="$height" \
     https://api.telegram.org/bot$bot_token/sendVideo?chat_id=$chat_id > /dev/null 2>&1
-    sleep 5s
 
     # 删除掉那个水印文件
     rm -rf -- "$video_thumb"
+    sleep 5s
 	count=$((count + 1))
 
 	# 将count写入用户配置文件
 	sed -i "s/\"count\":[^,}]*/\"count\":\"$count\"/g" "$dir/$chat_id/config/.config.json"
-    stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 次加水印哦"
+    stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
     sendtext
 	echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 压缩了一个文件：$filename" >> $dir/wmbot.log
 }
@@ -181,11 +181,20 @@ while true
 do
     updt=$(curl -s https://api.telegram.org/bot$bot_token/getupdates)
 
+    # getupdates 信息满了之后，保留10个最近的信息，其他全部丢弃
+    lastid=$(echo "$updt" | jq -r ".|.result|.[-1]|.update_id")
+    firstid=$(echo "$updt" | jq -r ".|.result|.[0]|.update_id")
+    totalmsg=$((lastid - firstid))
+    offset=$((lastid - 10))
+    if [ "$totalmsg" -eq 100 ]; then
+        curl -s https://api.telegram.org/bot$bot_token/getupdates?offset=$offset
+    fi
+
     # 通过 message_id 最后一个值获取最新消息
     newmsg_id=$(echo "$updt" | jq -r ".|.result|.[-1]|.message|.message_id")
 
     # ifnew 的值小于 new_msg 说明有新信息进入，然后新信息处理完毕后将 new_msg 的值赋予ifnew
-    if [ $ifnew -lt $newmsg_id ]; then
+    if [ "$ifnew" -lt "$newmsg_id" ]; then
 
         # 通过 chat_id 区分正在交互的用户
         chat_id=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.chat|.id") 
