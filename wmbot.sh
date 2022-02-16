@@ -1,6 +1,6 @@
 #!/bin/bash
 bot_token="<bot_token>"
-dir="/path/to/dir"
+dir="/your/path/to/dir"
 
 #对用户发送消息
 function sendtext(){
