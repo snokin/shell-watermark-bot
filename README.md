@@ -5,6 +5,7 @@
 - 单文件 Shell 脚本
 
 ## 怎么使用？
+-需要有 jq ，没有安装一个 `apt isntall jq`
 - @botfather 处申请一个 bot
 - 将 bot token 填到文件内 `<bot_token>` 处
 - 把机器人运行的主目录设置到 `/your/path/to/dir` 处
