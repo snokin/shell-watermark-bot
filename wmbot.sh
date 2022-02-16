@@ -1,10 +1,16 @@
 #!/bin/bash
 bot_token="<bot_token>"
+admin_id="<your_chat_id>"
 dir="/your/path/to/dir"
 
-#对用户发送消息
+# 向用户发送消息
 function sendtext(){
     curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$chat_id&text=$stext"
+}
+
+# 向系统管理员发送消息
+function sendadmin(){
+    curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$admin_id&text=$stext"
 }
 
 # 设置水印文件
@@ -30,6 +36,10 @@ function setpng(){
                 stext="水印文件已经给你设置好了"
                 sendtext
                 echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 设置了水印文件" >> $dir/wmbot.log
+
+                # 管理员偷窥用户动态
+                stext="$first_name 设置了个水印哦😬"
+                sendadmin
                 break
             else
                 stext="你发的好像不是 png 文件啊，发送的时候一定要记得取消勾选压缩哦"
@@ -46,6 +56,10 @@ function setpng(){
         echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 设置水印时超时,并被机器人无情的嘲讽了" >> $dir/wmbot.log
         stext="你是猪啊，发个破图片半天发不过来"
         sendtext
+
+        # 管理员偷窥用户动态
+        stext="$first_name 刚刚被机器人骂了，哈哈哈😂😂"
+        sendadmin
     fi
 }
 
@@ -70,12 +84,17 @@ function compress(){
 		  "count": "0"
 		}
 		END
+        echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 创建了自己的配置文件" >> $dir/wmbot.log
+
+        # 管理员偷窥用户动态
+        stext="$first_name 刚刚创建了自己的配置文件哦🤪"
+        sendadmin
 		sleep 1s
 	fi
 	
 	# 读取用户配置文件
 	configfile=$(cat "$dir/$chat_id/config/.config.json")
-	position=$(echo "$configfile" | jq -r ".position")
+	# position=$(echo "$configfile" | jq -r ".position") 暂时还没用
 	count=$(echo "$configfile" | jq -r ".count")
 
     # 判定用户是否设置了水印
@@ -134,9 +153,29 @@ function compress(){
 
 	# 将count写入用户配置文件
 	sed -i "s/\"count\":[^,}]*/\"count\":\"$count\"/g" "$dir/$chat_id/config/.config.json"
-    stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
+
+    # 一系列俏皮话
+    if [ $count -gt 200 ]; then
+        stext="挖槽！ $first_name！！！你差不多得了这都是你第 $count 个加水印的视频了🧐 悠着点吧，你要累趴我啊"
+    elif [ $count -gt 100 ]; then
+        stext="哇！$first_name 大爷！你都压了 $count 个视频了呢，你不打算给我点工钱吗？🥺"
+    elif [ $count -gt 50 ]; then
+        stext="我勒个去，没想到啊 $first_name！不知不觉你给 $count 个视频加水印了呢，你是干啥的啊？"
+    elif [ $count -gt 25 ]; then
+        stext="$first_name先森！你在我这里已经加了 $count 个水印了，你怎么这么能加水印啊？"
+    elif [ $count -gt 20 ]; then
+        stext="哈哈 $first_name 大爷！好了好了，不逗你了，你在这里加了 $count 个视频水印了😆"
+    elif [ $count -gt 10 ]; then
+        stext="呵！$first_name 大哥，你都不爱我……我以后不给你报数了🙄"
+    elif [ $count -gt 5 ]; then
+        stext="亲爱的 $first_name ……我是你的报数机器人😊 到目前为止你在我这里加过水印视频数为：$count 个"
+    elif [ $count -gt 2 ]; then
+        stext="😅你还真的再来一个啊？这是你第 $count 个加水印的视频哦"
+    else
+        stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
+    fi
     sendtext
-	echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 压缩了一个文件：$filename" >> $dir/wmbot.log
+	echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 压缩了一个文件(第 $count 次)：$filename" >> $dir/wmbot.log
 }
 
 function getfile(){
@@ -186,8 +225,14 @@ do
     firstid=$(echo "$updt" | jq -r ".|.result|.[0]|.update_id")
     totalmsg=$((lastid - firstid))
     offset=$((lastid - 10))
-    if [ "$totalmsg" -ge 99 ]; then
+    if [ "$totalmsg" -gt 99 ]; then
         curl -s https://api.telegram.org/bot$bot_token/getupdates?offset=$offset
+        echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] 已清空获取的聊天信息" >> $dir/wmbot.log
+
+        # 向机器人管理员发送通知
+        stext="聊天信息即将突破上线，现已清空！"
+        sendadmin
+        curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$chat_id&text=$stext"
     fi
 
     # 通过 message_id 最后一个值获取最新消息
@@ -214,7 +259,7 @@ do
 			elif [[ "$text" == "/setpng" ]]; then 
 				stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩哦。png 格式支持透明通道，效果会好很多哦"
 				sendtext
-				echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 想要设置水印文件" >> $dir/wmbot.log
+				echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 开始设置水印文件" >> $dir/wmbot.log
                 setpng
 			elif [[ "$text" == "/start" ]]; then
 				stext="我是一个给视频加水印的机器人，请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得设置一下你的水印哦"
@@ -224,6 +269,10 @@ do
 				stext="该功能还没上线呐，现在默认水印位置是左上角呢"
 				sendtext
 				echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 想要设置水印位置" >> $dir/wmbot.log
+            elif [[ "$text" == "/totalmsg" ]]; then 
+				stext="目前获取的聊天信息总数为：$totalmsg 条"
+				sendtext
+				echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 查看了目前的聊天信息总数" >> $dir/wmbot.log
 			else
 				echo "$first_name 说：$text"
 				echo "[$(date "+%Y-%m-%d %H:%M:%S")] $first_name 说：$text" >> $dir/wmbot.log
