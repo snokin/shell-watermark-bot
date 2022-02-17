@@ -1,16 +1,40 @@
 #!/bin/bash
 bot_token="<bot_token>"
-admin_id="your_chat_id"
-dir="/your/path/to/dir"
+admin_id="<your_chat_id>"
+dir="/path/to/dir"
 
-# 向用户发送消息
+# 来肝个机器人使用数据统计函数
+function botinfo(){
+	if [ ! -f "$dir/.site.json" ]; then
+		cat>"$dir/.site.json"<<-END
+		{
+			"totaluser":"0",
+			"usrwithwm":"0",
+			"totalvids":0,
+			"lastjoin":"no_one"
+		}
+		END
+	else
+		totaluser=$(cat "$dir/.site.json" | jq -r ".totaluser")
+		usrwithwm=$(cat "$dir/.site.json" | jq -r ".usrwithwm")
+		totalvids=$(cat "$dir/.site.json" | jq -r ".totalvids")
+		lastjoin=$(cat "$dir/.site.json" | jq -r ".lastjoin")
+	fi
+}
+
+# 向用户发送消息，代码内替换发送内容请搜索函数名
 function sendtext(){
     curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$chat_id&text=$stext"
 }
 
-# 向系统管理员发送消息
+# 向系统管理员发送消息，代码内替换发送内容请搜索函数名
 function sendadmin(){
     curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$admin_id&text=$stext"
+}
+
+# log 记录，代码内替换发送内容请搜索函数名
+function sendlog(){
+    echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $stext" >> $dir/wmbot.log
 }
 
 # 设置水印文件
@@ -44,11 +68,17 @@ function setpng(){
 
 					stext="水印文件已经给你设置好了"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 设置了水印文件" >> $dir/wmbot.log
+					stext="$first_name 设置了水印文件"
+					sendlog
 
 					# 管理员偷窥用户动态
 					stext="$first_name 设置了个水印哦😬"
 					sendadmin
+
+					# 用户加水印的操作计入 site.json 内
+					usrwithwm=$((usrwithwm+1))
+					sed -i "s/\"usrwithwm\":[^,}]*/\"usrwithwm\":\"$usrwithwm\"/g" "$dir/.site.json"
+
 					break
 				else
 					stext="你发的好像不是 png 文件啊，发送的时候一定要记得取消勾选压缩哦"
@@ -74,9 +104,11 @@ function setpng(){
 
     # 当用户超时的时候嘲讽他
     if [ "$i" -ge 30 ]; then 
-        echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 设置水印时超时,并被机器人无情的嘲讽了" >> $dir/wmbot.log
+		chat_id="$current_id"
         stext="你是猪啊，发个破图片半天发不过来"
         sendtext
+		stext="$first_name 设置水印时超时,并被机器人无情的嘲讽了"
+        sendlog
 
         # 管理员偷窥用户动态
         stext="$first_name 刚刚被我骂了，哈哈哈😂😂"
@@ -93,13 +125,13 @@ function compress(){
 		sleep 1s
 	fi
 
-    # 判定用户配置目录是否存在
+    # 判断用户配置目录是否存在
 	if [ ! -d "$dir/$chat_id/config" ]; then
 		mkdir -p -- "$dir/$chat_id/config"
 		sleep 1s
 	fi
 
-    # 判定用户配置文件是否存在，没有就给写个默认的文件
+    # 判断用户配置文件是否存在，没有就给写个默认的文件
 	if [ ! -f "$dir/$chat_id/config/.config.json" ]; then
 		cat>"$dir/$chat_id/config/.config.json"<<-END
 		{
@@ -107,11 +139,21 @@ function compress(){
 		  "count": "0"
 		}
 		END
-        echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 创建了自己的配置文件" >> $dir/wmbot.log
+		stext="$first_name 创建了自己的配置文件"
+        sendlog
 
         # 管理员偷窥用户动态
         stext="$first_name 刚刚创建了自己的配置文件哦🤪"
         sendadmin
+
+		# 用户算是正式加入，计入 site.json 内
+		totaluser=$((totaluser+1))
+		sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
+
+		# 最后一个注册用户，计入 site.json 内
+		lastjoin="$first_name"
+		sed -i "s/\"lastjoin\":[^,}]*/\"lastjoin\":\"$lastjoin\"/g" "$dir/.site.json"
+
 		sleep 1s
 	fi
 	
@@ -120,16 +162,16 @@ function compress(){
 	# position=$(echo "$configfile" | jq -r ".position") 暂时还没用
 	count=$(echo "$configfile" | jq -r ".count")
 
-    # 判定用户是否设置了水印
+    # 判断用户是否设置了水印
     wmark="$dir/$chat_id/config/watermark.png"
     if [ ! -f "$wmark" ]; then
         stext="你没设置水印文件哦，我只能给你打默认水印啦。回头自己设置一个水印文件吧。亲亲"
         sendtext
-        cp -- "$dir/$chat_id/watermark.png" "$wmark"
+        cp -- "$dir/watermark.png" "$wmark"
 
-        #在判定一下主目录内有没有默认水印文件
-        if [ ! -f "$wmark" ]; then
-            touch "$wmark"
+        #在判断一下主目录内有没有默认水印文件
+        if [ ! -f "$dir/watermark.png" ]; then
+            touch "$dir/watermark.png"
         fi
     fi
 
@@ -177,6 +219,10 @@ function compress(){
 	# 将count写入用户配置文件
 	sed -i "s/\"count\":[^,}]*/\"count\":\"$count\"/g" "$dir/$chat_id/config/.config.json"
 
+	# 转码视频计入 site.json 内
+	totalvids=$((totalvids+1))
+	sed -i "s/\"totalvids\":[^,}]*/\"totalvids\":\"$totalvids\"/g" "$dir/.site.json"
+
     # 一系列俏皮话
     if [ $count -gt 200 ]; then
         stext="挖槽！ $first_name！！！你差不多得了这都是你第 $count 个加水印的视频了🧐 悠着点吧，你要累趴我啊"
@@ -198,7 +244,8 @@ function compress(){
         stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
     fi
     sendtext
-	echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 压缩了一个文件(第 $count 次)：$filename" >> $dir/wmbot.log
+	stext="$first_name 压缩了一个文件(第$count次)：$filename"
+	sendlog
 }
 
 function getfile(){
@@ -217,11 +264,13 @@ function getfile(){
     if [ ! -n "$file_id" ]; then
         stext="你倒是给我发个视频呀，大爷！"
         sendtext
-		echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 发了个非视频消息" >> $dir/wmbot.log
+		stext="$first_name 发了个非视频消息"
+		sendlog
     else
-        # 再加个 video_url 判定，因为 Telegram api 的限制如果文件超过20M 这个值是 null 会导致出错
+        # 再加个 video_url 判断，因为 Telegram api 的限制如果文件超过20M 这个值是 null 会导致出错
         if [[ "$video_url" =~ null ]] || [ ! -n "$video_url" ];then 
-            echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 发来的的文件体积超限了" >> $dir/wmbot.log
+			stext="$first_name 发来的的文件体积超限了"
+			sendlog
             stext="哎呀妈呀，你这个视频好特么大啊，超过20M的文件不是我不想帮你加水印，Telegram 拦着不给我呀"
             sendtext
         else
@@ -254,7 +303,8 @@ do
 		offset=$((lastid - 10))
 		if [ "$totalmsg" -ge 99 ]; then
 			curl -s https://api.telegram.org/bot$bot_token/getupdates?offset=$offset
-			echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] 已清空获取的聊天信息" >> $dir/wmbot.log
+			stext="已清空轮询获取的聊天信息"
+			sendlog
 
 			# 向机器人管理员发送通知
 			stext="聊天信息即将突破上限，现已清空！"
@@ -262,13 +312,16 @@ do
 			curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$chat_id&text=$stext"
 		fi
 
-		# 通过 message_id 最后一个值获取最新消息
+		# 机器人使用统计在这开始吧
+		botinfo
+
+		# 轮询获取最后一个信息的 message_id
 		newmsg_id=$(echo "$updt" | jq -r ".|.result|.[-1]|.message|.message_id")
 
-		# ifnew 的值小于 new_msg 说明有新信息进入，然后新信息处理完毕后将 new_msg 的值赋予ifnew
+		# ifnew 的值小于 newmsg_id 说明有新信息进入，然后新信息处理完毕后将 new_msg 的值赋予ifnew
 		if [ "$ifnew" -lt "$newmsg_id" ]; then
 
-			# 通过 chat_id 区分正在交互的用户
+			# 通过 chat_id 区分正在交互的用户，并获取用户信息
 			chat_id=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.chat|.id") 
 			first_name=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.chat|.first_name")
 			
@@ -282,35 +335,49 @@ do
 				if [[ "$text" == "/help" ]]; then
 					stext="嗨！你来啦？🤩 $first_name 🥳 我是一个小小的水印机器人，你只要给我发视频过来，我就会给你把视频加好水印发回给你。如果想设置自己的专属水印点击 /setpng 哦 🤪"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 阅读了帮助文档" >> $dir/wmbot.log
+					stext="$first_name 阅读了帮助文档"
+					sendlog
 				elif [[ "$text" == "/setpng" ]]; then 
 					stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩哦。png 格式支持透明通道，效果会好很多哦"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 开始设置水印文件" >> $dir/wmbot.log
+					stext="$first_name 开始设置水印文件"
+					sendlog
+
+					# 开始设置水印文件
 					setpng
 				elif [[ "$text" == "/start" ]]; then
-					stext="我是一个给视频加水印的机器人，请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得设置一下你的水印哦"
+					stext="我是一个给视频加水印的机器人%0A到目前为止我已经处理了 $totalvids 个视频呢%0A %0A就请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得设置一下你的水印哦"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 点了start命令" >> $dir/wmbot.log
+					stext="$first_name 点了start命令"
+					sendlog
 				elif [[ "$text" == "/setposition" ]]; then 
 					stext="该功能还没上线呐，现在默认水印位置是左上角呢"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 想要设置水印位置" >> $dir/wmbot.log
-				elif [[ "$text" == "/totalmsg" ]]; then 
-					stext="目前获取的聊天信息总数为：$totalmsg 条"
+					stext="$first_name 想要设置水印位置"
+					sendlog
+				elif [[ "$text" == "/information" ]]; then 
+					stext="总用户数为：$totaluser%0A此次轮询数：$totalmsg%0A总处理视频：$totalvids%0A总消息数为：$newmsg_id%0A最后注册者：$lastjoin"
 					sendtext
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] $first_name 查看了目前的聊天信息总数" >> $dir/wmbot.log
+					stext="$first_name 偷偷查看了机器人的数据"
+					sendlog
+
+					# 管理员偷窥用户动态
+					stext="$first_name 偷偷查看了机器人的数据哦"
+					sendadmin
 				else
 					echo "$first_name 说：$text"
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] $first_name 说：$text" >> $dir/wmbot.log
+					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [用户] $first_name 说：$text" >> $dir/wmbot.log
 				fi
 			fi
 		fi
 		sleep 1s
 		ifnew=$newmsg_id
 	else
-		echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] Telegram bot api 发生故障，请检查" >> $dir/wmbot.log
+		stext="Telegram bot api 发生故障，请检查"
+		sendlog
 		echo "[$(date "+%Y-%m-%d %H:%M:%S")] [系统] Telegram bot api 发生故障，请检查"
-		sleep 120s
+		sleep 5s
+		stext="Telegram bot api 刚才发生了故障！"
+		sendadmin
 	fi
 done
