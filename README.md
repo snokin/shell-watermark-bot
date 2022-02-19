@@ -12,6 +12,8 @@
 - 把机器人运行的主目录设置到文件内 `/your/path/to/dir` 处
 - 主目录内准备个 .png 的水印文件（用户不设置水印就会用这个）
 - `sh ./wmbot.sh`
+- @botfather 处增加如下命令
+`/start` `/myinfo` `/setpng` `help`
 
 ## 这机器人好用不
 - Telegram bot api 只支持 20M 以内文件的传输
