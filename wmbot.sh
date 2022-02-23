@@ -1,7 +1,8 @@
 #!/bin/bash
 bot_token="<bot_token>"
-admin_id="<your_chat_id>"
+admin_id="your_chat_id"
 dir="/path/to/dir"
+
 # 后台进程数，超过这个进程数就不在开新进程了
 processlmt=5
 
@@ -13,7 +14,7 @@ function botinfo(){
 			"totaluser":"0",
 			"usrwithwm":"0",
 			"totalvids":"0",
-			"lastjoin":"no_one",
+			"lastjoin":"null",
 			"processes":"0",
 			"apicrush":"0"
 		}
@@ -30,13 +31,19 @@ function botinfo(){
 
 # 向用户发送消息，代码内替换发送内容请搜索函数名
 function sendtext(){
-    curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$chat_id&text=$stext"
+	curl -s \
+    https://api.telegram.org/bot$bot_token/sendMessage \
+    -d text="$stext" \
+    -d chat_id="$chat_id"
 }
 
 # 向系统管理员发送消息，代码内替换发送内容请搜索函数名 2022/2/19 更新，如果时admin自己在操作发个什么提醒发
 function sendadmin(){
 	if [ "$admin_id" -ne "$chat_id" ]; then
-		curl "https://api.telegram.org/bot$bot_token/sendMessage?chat_id=$admin_id&text=$stext"
+		curl -s \
+		https://api.telegram.org/bot$bot_token/sendMessage \
+		-d text="$stext" \
+		-d chat_id="$admin_id"
 	fi
 }
 
@@ -55,6 +62,9 @@ function setpng(){
 	# 当前用户的 chat_id 暂时保存下来以免与其他发新消息的用户混淆
 	local current_id="$chat_id"
 	
+	# 生成一个 .lock 文件，如果检测到该用户的目录内有这个文件，他就进不去 getfile 函数内
+	touch "$dir/$current_id/set.lock"
+	
     while [ $i -le 30 ]
     do 
         local updt=$(curl -s https://api.telegram.org/bot$bot_token/getupdates)
@@ -70,25 +80,31 @@ function setpng(){
 					local doc_id=$(echo $updt | jq -r ".|.result|.[]|.message|select(.message_id == $newmsg_id)|.document|.file_id")
 					local docinfo=$(curl -s https://api.telegram.org/bot$bot_token/getFile?file_id=$doc_id)
 					local doc_url=$(echo $docinfo | jq -r ".|.result|.file_path")
-					wget "https://api.telegram.org/file/bot$bot_token/$doc_url" -O "$dir/$chat_id/config/watermark.png"
-
-					local stext="水印文件已经给你设置好了"
-					sendtext
-					local stext="$first_name 设置了水印文件"
-					sendlog
-
-					# 管理员偷窥用户动态
-					local stext="$first_name 设置了个水印哦😬"
-					sendadmin
 
 					# 用户加水印的操作计入 site.json 内
 					local usrwithwm=$((usrwithwm+1))
 					sed -i "s/\"usrwithwm\":[^,}]*/\"usrwithwm\":\"$usrwithwm\"/g" "$dir/.site.json"
 
+					wget "https://api.telegram.org/file/bot$bot_token/$doc_url" -O "$dir/$chat_id/config/watermark.png"
+
+					stext="水印文件已经给你设置好了"
+					sendtext
+					stext="$first_name 设置了水印文件"
+					sendlog
+
+					# 管理员偷窥用户动态
+					stext="$first_name 设置了个水印哦😬"
+					sendadmin
+					
+					# 删除 .lock 文件，然后又能愉快的设置水印文件了
+					rm -rf "$dir/$current_id/set.lock"
 					break
 				else
-					local stext="你发的好像不是 png 文件啊，发送的时候一定要记得取消勾选压缩哦"
+					stext="你发的好像不是 png 文件啊，发送的时候一定要记得取消勾选压缩哦"
 					sendtext
+					
+					# 删除 .lock 文件
+					rm -rf "$dir/$current_id/set.lock"
 					break
 				fi
 			fi
@@ -100,13 +116,17 @@ function setpng(){
     # 当用户超时的时候嘲讽他
     if [ "$i" -ge 30 ]; then 
 		local chat_id="$current_id"
+
+		# 删除 .lock 文件
+		rm -rf "$dir/$chat_id/set.lock"
+
         stext="你是猪啊，发个破图片半天发不过来"
         sendtext
-		local stext="$first_name 设置水印时超时,并被机器人无情的嘲讽了"
+		stext="$first_name 设置水印时超时,并被机器人无情的嘲讽了"
         sendlog
 
         # 管理员偷窥用户动态
-        local stext="$first_name 刚刚被我骂了，哈哈哈😂😂"
+        stext="$first_name 刚刚被我骂了，哈哈哈😂😂"
         sendadmin
     fi
 }
@@ -173,9 +193,10 @@ function compress(){
 	# 压缩主命令
     ffmpeg -i "$dir/$chat_id/$filename" \
     -i $wmark \
-    -filter_complex "[1][0]scale2ref=w='iw*40/100':h='ow/mdar'[vid][wm]; \
-    [wm][vid]overlay=W/11:H/12:format=auto,format=yuv420p" \
-    -c:a copy \
+	-filter_complex "[1][0]scale2ref=w='if(gte(iw,ih),iw*20/100,iw*35/100)':h='ow/mdar'[vid][wm]; \
+	[wm][vid]overlay=w/4:w/4:format=auto,format=yuv420p" \
+	-c:a copy \
+	-crf 28 \
     "$dir/$chat_id/watermarked/$filename"
     echo "转换完毕，现在要发回去了"
 
@@ -185,18 +206,18 @@ function compress(){
 	local height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$media")
 
     # 生成缩略图，上传完毕后需要删除掉这个缩略图文件
-	local video_thumb="$media.png"
+	local video_thumb="$media.jpeg"
 
 	# 缩略图竖向和横向视频最长边设置为 400 像素
 	if [ "$height" != null ]; then
 		if [ "$height" -ge "$width" ]; then
-			ffmpeg -i "$media" -ss 00:00:02.000 -vframes 1 -filter:v scale="-1:400" "$video_thumb" -y > /dev/null 2>&1
+			ffmpeg -i "$media" -ss 00:00:02.000 -vframes 1 -filter:v scale="-1:320" "$video_thumb" -y > /dev/null 2>&1
 		elif [ "$width" -gt "$height" ]; then
-			ffmpeg -i "$media" -ss 00:00:02.000 -vframes 1 -filter:v scale="400:-1" "$video_thumb" -y > /dev/null 2>&1
+			ffmpeg -i "$media" -ss 00:00:02.000 -vframes 1 -filter:v scale="320:-1" "$video_thumb" -y > /dev/null 2>&1
 		fi
 	fi
 
-    local stext="终于转换完了，我亲爱的大爷！累死个我了🥵 视频马上发给你，请稍等哦……"
+    stext="终于转换完了，我亲爱的大爷！累死个我了🥵 视频马上发给你，请稍等哦……"
     sendtext
 
 	# 发送视频主命令
@@ -204,6 +225,7 @@ function compress(){
     -F video=@"$media" \
     -F width="$width" \
     -F height="$height" \
+	-F -sendChatAction="videos" \
     https://api.telegram.org/bot$bot_token/sendVideo?chat_id=$chat_id > /dev/null 2>&1
 
     # 删除掉那个水印文件
@@ -226,26 +248,26 @@ function compress(){
 
     # 一系列俏皮话
     if [ $count -gt 200 ]; then
-        local stext="挖槽！ $first_name！！！你差不多得了这都是你第 $count 个加水印的视频了🧐 悠着点吧，你要累趴我啊"
+        stext="挖槽！ $first_name！！！你差不多得了这都是你第 $count 个加水印的视频了🧐 悠着点吧，你要累趴我啊"
     elif [ $count -gt 100 ]; then
-        local stext="哇！$first_name 大爷！你都压了 $count 个视频了呢，你不打算给我点工钱吗？🥺"
+        stext="哇！$first_name 大爷！你都压了 $count 个视频了呢，你不打算给我点工钱吗？🥺"
     elif [ $count -gt 50 ]; then
-        local stext="我勒个去，没想到啊 $first_name！不知不觉你给 $count 个视频加水印了呢，你是干啥的啊？"
+        stext="我勒个去，没想到啊 $first_name！不知不觉你给 $count 个视频加水印了呢，你是干啥的啊？"
     elif [ $count -gt 25 ]; then
-        local stext="$first_name先森！你在我这里已经加了 $count 个水印了，你怎么这么能加水印啊？"
+        stext="$first_name先森！你在我这里已经加了 $count 个水印了，你怎么这么能加水印啊？"
     elif [ $count -gt 20 ]; then
-        local stext="哈哈 $first_name 大爷！好了好了，不逗你了，你在这里加了 $count 个视频水印了😆"
+        stext="哈哈 $first_name 大爷！好了好了，不逗你了，你在这里加了 $count 个视频水印了😆"
     elif [ $count -gt 10 ]; then
-        local stext="呵！$first_name 大哥，你都不爱我……我以后不给你报数了🙄"
+        stext="呵！$first_name 大哥，你都不爱我……我以后不给你报数了🙄"
     elif [ $count -gt 5 ]; then
-        local stext="亲爱的 $first_name ……我是你的报数机器人😊 到目前为止你在我这里加过水印视频数为：$count 个"
+        stext="亲爱的 $first_name ……我是你的报数机器人😊 到目前为止你在我这里加过水印视频数为：$count 个"
     elif [ $count -gt 2 ]; then
-        local stext="😅你还真的再来一个啊？这是你第 $count 个加水印的视频哦"
+        stext="😅你还真的再来一个啊？这是你第 $count 个加水印的视频哦"
     else
-        local stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
+        stext="怎么样啊？$first_name 大爷！要不要再来一个？这是你第 $count 个加水印的视频哦"
     fi
     sendtext
-	local stext="$first_name 压缩了一个文件(第$count次)：$filename"
+	stext="$first_name 压缩了一个文件(第$count次)：$filename"
 	sendlog
 
 	# 压缩完毕后线程数减1,并删掉.lock文件
@@ -265,32 +287,34 @@ function getfile(){
     if [ ! -d "$dir/$chat_id" ]; then
         mkdir -p -- "$dir/$chat_id"
 	fi
-    if [[ $filename =~ null ]]; then
 
-        # video_2022-02-15_22-08-42.mp4 假如获取不到文件名
+    if [[ $filename =~ null ]] || [ -f "$dir/$chat_id/$filename" ]; then
+
+        # video_2022-02-15_22-08-42.mp4 假如获取不到文件名，或者与已下载文件重名
         local filename="video_$(date "+%Y-%m-%d_%H-%M-%S").mp4"
     fi
     if [ ! -n "$file_id" ]; then
-        local stext="你倒是给我发个视频呀，大爷！"
+        stext="你倒是给我发个视频呀，大爷！"
         sendtext
-		local stext="$first_name 发了个非视频消息"
+		stext="$first_name 发了个非视频消息"
 		sendlog
     else
         # 再加个 video_url 判断，因为 Telegram api 的限制如果文件超过20M 这个值是 null 会导致出错
         if [[ $video_url =~ null ]] || [ ! -n "$video_url" ];then 
-			local stext="$first_name 发来的的文件体积超限了"
+			stext="$first_name 发来的的文件体积超限了"
 			sendlog
-            local stext="哎呀妈呀，你这个视频好特么大啊，超过20M的文件不是我不想帮你加水印，Telegram 拦着不给我呀"
+            stext="哎呀妈呀，你这个视频好特么大啊，超过20M的文件不是我不想帮你加水印，Telegram 拦着不给我呀"
             sendtext
         else
-            if [ ! -f "$dir/$chat_id/$filename" ] && [ ! -f "$dir/$chat_id/$newmsg_id.lock" ]; then
+            if [ ! -f "$dir/$chat_id/$newmsg_id.lock" ]; then
 
 				# 生成一个当前 message_id 的.lock文件，以防止同一条消息的文件多次顺利通过这个判断
 				touch "$dir/$chat_id/$newmsg_id.lock"
                 echo "要开始下载了"
+
                 wget "https://api.telegram.org/file/bot$bot_token/$video_url" -O "$dir/$chat_id/$filename"
                 echo "下载完了"
-                local stext="收到你的视频了，我真是谢谢你哦……稍后加好水印我发回给你"
+                stext="收到你的视频了，我真是谢谢你哦……稍后加好水印我发回给你"
                 sendtext
 				if [ "$processes" -le "$processlmt" ]; then
 					processes=$(cat "$dir/.site.json" | jq -r ".processes")
@@ -303,7 +327,7 @@ function getfile(){
 					processes=$(cat "$dir/.site.json" | jq -r ".processes")
 					inline=$((processes-processlmt+1))
 					echo "压缩视频超过线程数了,$inline排队中……"
-					local stext="压缩任务太重了啦，目前有$inline个任务正在排队中……待会儿重新给我发吧"
+					stext="压缩任务太重了啦，目前有$inline个任务正在排队中……待会儿重新给我发吧"
 					sendtext
 				fi
             fi
@@ -355,7 +379,8 @@ do
 			text=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.text")
 			if [ ! -n "$text" ]; then
 				echo "无F**K可说"
-			elif [[ $text =~ "null" ]]; then
+			elif [[ $text =~ "null" ]] && [ ! -f "$dir/$chat_id/set.lock" ]; then
+				# 上面第二个 if 判断该用户目录下有无 set.lock ，如有说明其正在设置水印
 				getfile
 			else
 				if [[ "$text" == "/help" ]]; then
@@ -364,22 +389,24 @@ do
 					stext="$first_name 阅读了帮助文档"
 					sendlog
 				elif [[ "$text" == "/setpng" ]]; then 
-					stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩哦。png 格式支持透明通道，效果会好很多哦"
+					stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩。png 格式支持透明通道，效果会好很多，最佳分辨率是 500x180px"
 					sendtext
 					stext="$first_name 开始设置水印文件"
 					sendlog
 
-					# 开始设置水印文件也放入了后台，没想到后台运行仅仅时加个"&"号就可以了，另一个getfile函数我还做了进程数管理
+					# 开始设置水印文件也放入了后台，没想到后台运行仅仅是加个"&"号就可以了，另一个getfile函数我也做了进程数管理
 					setpng &
 				elif [[ "$text" == "/start" ]]; then
 					stext="我是一个给视频加水印的机器人%0A到目前为止我已经处理了 $totalvids 个视频呢%0A %0A就请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得设置一下你的水印哦"
 					sendtext
 
-					# 用户算是正式加入，计入 site.json 内
-					local totaluser=$((totaluser+1))
-					sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
+					if [ ! -f "$dir/$chat_id" ];then
+						# 用户算是正式加入，计入 site.json 内
+						totaluser=$((totaluser+1))
+						sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
+					fi
 
-					stext="$first_name 点了start命令"
+					stext="$first_name 点了/start命令"
 					sendlog
 				elif [[ "$text" == "/setposition" ]]; then 
 					stext="该功能还没上线呐，现在默认水印位置是左上角呢"
@@ -392,8 +419,10 @@ do
 					jointime=$(cat "$configfile" | jq -r ".jointime")
 					stext="总共加水印：$count 次%0Achat_id：$chat_id%0A加入时间：$jointime"
 					sendtext
+					stext="$first_name 查看了自己的信息"
+					sendlog
 				elif [[ "$text" == "/information" ]]; then
-					stext="总用户数为：$totaluser%0A设水印用户：$usrwithwm%0A此次轮询数：$totalmsg%0A总处理视频：$totalvids%0A总消息数为：$newmsg_id%0A最后注册者：$lastjoin%0A当前线程数：$processes%0A轮询故障数：$apicrush"
+					stext="总用户数为：$totaluser%0A设水印次数：$usrwithwm%0A此次轮询数：$totalmsg%0A总处理视频：$totalvids%0A总消息数为：$newmsg_id%0A最后注册者：$lastjoin%0A正在转码数：$processes%0A轮询故障数：$apicrush"
 					sendtext
 					stext="$first_name 查看了机器人的数据"
 					sendlog
