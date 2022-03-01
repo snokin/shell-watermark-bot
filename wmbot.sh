@@ -1,6 +1,6 @@
 #!/bin/bash
 bot_token="<bot_token>"
-admin_id="your_chat_id"
+admin_id="<your_chat_id>"
 dir="/path/to/dir"
 
 # 后台进程数，超过这个进程数就不在开新进程了
@@ -37,7 +37,7 @@ function sendtext(){
     -d chat_id="$chat_id"
 }
 
-# 向系统管理员发送消息，代码内替换发送内容请搜索函数名 2022/2/19 更新，如果时admin自己在操作发个什么提醒发
+# 向系统管理员发送消息，代码内替换发送内容请搜索函数名 2022/2/19 更新，如果是admin自己在操作发个什么提醒啊
 function sendadmin(){
 	if [ "$admin_id" -ne "$chat_id" ]; then
 		curl -s \
@@ -61,6 +61,12 @@ function setpng(){
 	
 	# 当前用户的 chat_id 暂时保存下来以免与其他发新消息的用户混淆
 	local current_id="$chat_id"
+
+	# 判断用户配置目录是否存在
+	if [ ! -d "$dir/$current_id/config" ]; then
+		mkdir -p -- "$dir/$current_id/config"
+		sleep 1s
+	fi
 	
 	# 生成一个 .lock 文件，如果检测到该用户的目录内有这个文件，他就进不去 getfile 函数内
 	touch "$dir/$current_id/set.lock"
@@ -176,6 +182,9 @@ function compress(){
 	# position=$(cat "$configfile" | jq -r ".position") 暂时还没用
 	local count=$(cat "$configfile" | jq -r ".count")
 	local jointime=$(cat "$configfile" | jq -r ".jointime")
+	local position=$(cat "$configfile" | jq -r ".position")
+
+	wmposition
 
     # 判断用户是否设置了水印
     local wmark="$dir/$chat_id/config/watermark.png"
@@ -183,18 +192,13 @@ function compress(){
         stext="你没设置水印文件哦，我只能给你打默认水印啦。回头自己设置一个水印文件吧。亲亲"
         sendtext
         cp -- "$dir/watermark.png" "$wmark"
-
-        #在判断一下主目录内有没有默认水印文件
-        if [ ! -f "$dir/watermark.png" ]; then
-            touch "$dir/watermark.png"
-        fi
     fi
 
 	# 压缩主命令
     ffmpeg -i "$dir/$chat_id/$filename" \
     -i $wmark \
 	-filter_complex "[1][0]scale2ref=w='if(gte(iw,ih),iw*20/100,iw*35/100)':h='ow/mdar'[vid][wm]; \
-	[wm][vid]overlay=w/4:w/4:format=auto,format=yuv420p" \
+					[wm][vid]overlay=w/4:w/4:format=auto,format=yuv420p" \
 	-c:a copy \
 	-crf 28 \
     "$dir/$chat_id/watermarked/$filename"
@@ -381,7 +385,7 @@ do
 				echo "无F**K可说"
 			elif [[ $text =~ "null" ]] && [ ! -f "$dir/$chat_id/set.lock" ]; then
 				# 上面第二个 if 判断该用户目录下有无 set.lock ，如有说明其正在设置水印
-				getfile
+				getfile &
 			else
 				if [[ "$text" == "/help" ]]; then
 					stext="嗨！你来啦？🤩 $first_name 🥳 我是一个小小的水印机器人，你只要给我发视频过来，我就会给你把视频加好水印发回给你。如果想设置自己的专属水印点击 /setpng 哦 🤪"
@@ -400,7 +404,7 @@ do
 					stext="我是一个给视频加水印的机器人%0A到目前为止我已经处理了 $totalvids 个视频呢%0A %0A就请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得设置一下你的水印哦"
 					sendtext
 
-					if [ ! -f "$dir/$chat_id" ];then
+					if [ ! -d "$dir/$chat_id" ];then
 						# 用户算是正式加入，计入 site.json 内
 						totaluser=$((totaluser+1))
 						sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
