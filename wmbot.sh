@@ -1,6 +1,6 @@
 #!/bin/bash
-bot_token="<bot_tiken>"
-admin_id="chat_ID"
+bot_token="<Bot_Token>"
+admin_id="Chat_ID"
 dir="/home/wmbot"
 
 # 后台进程数，超过这个进程数就不在开新进程了
@@ -185,7 +185,7 @@ function compress(){
         cp -- "$dir/watermark.png" "$wmark"
     fi
 	
-	# 视频输出格式
+	# 视频输出格式设定为 mp4
 	filenamenosuffix=$(echo $filename | cut -d . -f1)
 	output="$filenamenosuffix.mp4"
 	
@@ -201,8 +201,6 @@ function compress(){
 		if [ "$vwidth" -lt 400 ]; then
 			vscale="480:-2"
 		fi
-		stext="$vwidth 竖向视频"
-		sendtext
 	else
 	
 		# 视频为横向的，判断视频高度是否小于500像素
@@ -211,11 +209,15 @@ function compress(){
 		fi
 	fi
 
+	# 获取视频长度，并设置第三个水印在视频结束前5秒消失
+	info=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$dir/$chat_id/$filename")
+	wmdismiss=$(("${info%.*}" - 5))
+
 	# 压缩主命令
     ffmpeg -i "$dir/$chat_id/$filename" \
     -i $wmark \
 	-filter_complex "scale=$vscale[0];[1][0]scale2ref=w='if(gt(iw,ih),iw*20/100,iw*35/100)':h='ow/mdar'[vid][wm]; \
-					[wm][vid]overlay=w/4:w/4:enable='between(t,5,10)+between(t,30,50)+between(t,90,120)':format=auto,format=yuv420p" \
+					[wm][vid]overlay=w/4:w/4:enable='between(t,5,10)+between(t,25,60)+between(t,90,$wmdismiss)':format=auto,format=yuv420p" \
 	-c:a copy \
 	-strict -2 \
 	-crf 26 \
@@ -265,7 +267,7 @@ function compress(){
 	-F caption="$caption" \
     https://api.telegram.org/bot$bot_token/sendVideo?chat_id=$chat_id > /dev/null 2>&1
 
-    # 删除掉那个水印文件
+    # 删除掉那个缩略图文件
     rm -rf -- "$video_thumb"
     sleep 5s
 
@@ -352,6 +354,7 @@ function getfile(){
     fi
 }
 
+# 获取用户发送的链接
 function geturl(){
 
 	local chat_id="$chat_id"
@@ -368,13 +371,13 @@ function geturl(){
 		local filesize=$(stat -c%s "$dir/$chat_id/$filename")
 		if	[ $filesize -ge 100000 ]; then
 			echo "下载完了"
-			stext="$first_name 发来一个链接"
-			sendlog
 			
 			# 获取文件大小 human readable
 			local fsize=$(ls -lh "$dir/$chat_id/$filename" | cut -d ' ' -f 5)
 			stext="已收到文件： $filename%0A大小：$fsize"
 			sendtext
+			stext="$first_name 从链接下载了一个文件"
+			sendlog
 			
 			if [ "$processes" -le "$processlmt" ]; then
 				processes=$(cat "$dir/.site.json" | jq -r ".processes")
@@ -393,6 +396,81 @@ function geturl(){
 		else
 			stext="你发来的链接什么文件都没有呢！"
 			sendtext
+		fi
+	fi
+}
+
+# 获取用户的信息
+receivemessage(){
+
+	# 获取发送的内容
+	text=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.text")
+
+	if [ ! -n "$text" ]; then
+		echo "无F**K可说"
+	elif [[ $text =~ "null" ]] && [ ! -f "$dir/$chat_id/set.lock" ]; then
+		# 上面第二个 if 判断该用户目录下有无 set.lock ，如有说明其正在设置水印
+		getfile &
+	else
+		if [[ "$text" == "/help" ]]; then
+			stext="1️⃣ 按 /setpng 开始设置水印。为了水印效果最优记得水印文件一定要 png 格式并且按原图发送哦（取消勾选压缩图片）。
+
+	2️⃣ 直接将其他处看到的视频转发给我就可以给你加水印了哦。当然视频上传给我也不是不行。处理的视频不得大于 20M 哦，这是 telegram 的限制。
+
+	3️⃣ 视频要一个一个发哦，如果一股脑发过来一堆视频的话，我只能处理第一个视频，因为我的作者不会处理批量发来的视频（其实是懒）……"
+			sendtext
+			stext="$first_name 阅读了帮助文档"
+			sendlog
+		elif [[ "$text" == "/setpng" ]] && [ ! -f "$dir/$chat_id/set.lock" ]; then 
+			stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩。png 格式支持透明通道，效果会好很多，最佳分辨率是 500x180px"
+			sendtext
+			stext="$first_name 开始设置水印文件"
+			sendlog
+			
+			# 开始设置水印文件也放入了后台，没想到后台运行仅仅是加个"&"号就可以了，另一个getfile函数我也做了进程数管理
+			setpng &
+		elif [[ "$text" == "/start" ]]; then
+			stext="嗨！你来啦？🤩 $first_name 🥳 我是一个给视频加水印的机器人%0A到目前为止我已经处理了 $totalvids 个视频呢%0A %0A就请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得按 /setpng 设置一下你的水印哦"
+			sendtext
+
+			if [ ! -d "$dir/$chat_id" ];then
+				# 用户算是正式加入，计入 site.json 内
+				totaluser=$((totaluser+1))
+				sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
+			fi
+
+			stext="$first_name 点了/start命令"
+			sendlog
+		elif [[ "$text" == "/setposition" ]]; then 
+			stext="该功能还没上线呐，现在默认水印位置是左上角呢"
+			sendtext
+			stext="$first_name 想要设置水印位置"
+			sendlog
+		elif [[ "$text" == "/myinfo" ]]; then
+			configfile="$dir/$chat_id/config/.config.json"
+			count=$(cat "$configfile" | jq -r ".count")
+			jointime=$(cat "$configfile" | jq -r ".jointime")
+			stext="总共加水印：$count 次%0Achat_id：$chat_id%0A加入时间：$jointime"
+			sendtext
+			stext="$first_name 查看了自己的信息"
+			sendlog
+		elif [[ "$text" == "/information" ]]; then
+			stext="总用户数为：$totaluser%0A设水印次数：$usrwithwm%0A此次轮询数：$totalmsg%0A总处理视频：$totalvids%0A总消息数为：$newmsg_id%0A最后注册者：$lastjoin%0A正在转码数：$processes%0A轮询故障数：$apicrush"
+			sendtext
+			stext="$first_name 查看了机器人的数据"
+			sendlog
+
+			# 管理员偷窥用户动态
+			stext="$first_name 偷偷查看了机器人的数据哦"
+			sendadmin
+		elif [[ "$text" = http*//*.webm ]] || [[ "$text" = http*//*.mov ]] || [[ "$text" = http*//*.mp4 ]] || [[ "$text" = http*//*.MOV ]] || [[ "$text" = http*//*.MP4 ]]; then
+		
+			# 检测到发来视频链接的时候
+			geturl &
+			
+		else
+			echo "$first_name 说：$text"
+			echo "[$(date "+%Y-%m-%d %H:%M:%S")] [用户] $first_name 说：$text" >> $dir/wmbot.log
 		fi
 	fi
 }
@@ -435,77 +513,12 @@ do
 			# 通过 chat_id 区分正在交互的用户，并获取用户信息
 			chat_id=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.chat|.id") 
 			first_name=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.chat|.first_name")
-			
-			# 获取发送的内容
-			text=$(echo "$updt" | jq -r ".|.result|.[]|.message|select(.message_id == "$newmsg_id")|.text")
-			if [ ! -n "$text" ]; then
-				echo "无F**K可说"
-			elif [[ $text =~ "null" ]] && [ ! -f "$dir/$chat_id/set.lock" ]; then
-				# 上面第二个 if 判断该用户目录下有无 set.lock ，如有说明其正在设置水印
-				getfile &
-			else
-				if [[ "$text" == "/help" ]]; then
-					stext="1️⃣ 按 /setpng 开始设置水印。为了水印效果最优记得水印文件一定要 png 格式并且按原图发送哦（取消勾选压缩图片）。
 
-2️⃣ 直接将其他处看到的视频转发给我就可以给你加水印了哦。当然视频上传给我也不是不行。处理的视频不得大于 20M 哦，这是 telegram 的限制。
-
-3️⃣ 视频要一个一个发哦，如果一股脑发过来一堆视频的话，我只能处理第一个视频，因为我的作者不会处理批量发来的视频（其实是懒）……"
-					sendtext
-					stext="$first_name 阅读了帮助文档"
-					sendlog
-				elif [[ "$text" == "/setpng" ]]; then 
-					stext="好吧，那就把你的水印文件发过来吧。水印文件一定要 png 格式哦，发送的时候一定记得取消勾选压缩。png 格式支持透明通道，效果会好很多，最佳分辨率是 500x180px"
-					sendtext
-					stext="$first_name 开始设置水印文件"
-					sendlog
-					
-					# 开始设置水印文件也放入了后台，没想到后台运行仅仅是加个"&"号就可以了，另一个getfile函数我也做了进程数管理
-					setpng
-				elif [[ "$text" == "/start" ]]; then
-					stext="嗨！你来啦？🤩 $first_name 🥳 我是一个给视频加水印的机器人%0A到目前为止我已经处理了 $totalvids 个视频呢%0A %0A就请直接把视频发给我吧，我会给你的视频加水印发回给你哦。我目前只支持处理 20M 以内的视频，呵呵哒。最好记得按 /setpng 设置一下你的水印哦"
-					sendtext
-
-					if [ ! -d "$dir/$chat_id" ];then
-						# 用户算是正式加入，计入 site.json 内
-						totaluser=$((totaluser+1))
-						sed -i "s/\"totaluser\":[^,}]*/\"totaluser\":\"$totaluser\"/g" "$dir/.site.json"
-					fi
-
-					stext="$first_name 点了/start命令"
-					sendlog
-				elif [[ "$text" == "/setposition" ]]; then 
-					stext="该功能还没上线呐，现在默认水印位置是左上角呢"
-					sendtext
-					stext="$first_name 想要设置水印位置"
-					sendlog
-				elif [[ "$text" == "/myinfo" ]]; then
-					configfile="$dir/$chat_id/config/.config.json"
-					count=$(cat "$configfile" | jq -r ".count")
-					jointime=$(cat "$configfile" | jq -r ".jointime")
-					stext="总共加水印：$count 次%0Achat_id：$chat_id%0A加入时间：$jointime"
-					sendtext
-					stext="$first_name 查看了自己的信息"
-					sendlog
-				elif [[ "$text" == "/information" ]]; then
-					stext="总用户数为：$totaluser%0A设水印次数：$usrwithwm%0A此次轮询数：$totalmsg%0A总处理视频：$totalvids%0A总消息数为：$newmsg_id%0A最后注册者：$lastjoin%0A正在转码数：$processes%0A轮询故障数：$apicrush"
-					sendtext
-					stext="$first_name 查看了机器人的数据"
-					sendlog
-
-					# 管理员偷窥用户动态
-					stext="$first_name 偷偷查看了机器人的数据哦"
-					sendadmin
-				elif [[ "$text" = http*//*.webm ]] || [[ "$text" = http*//*.mov ]] || [[ "$text" = http*//*.mp4 ]] || [[ "$text" = http*//*.MOV ]] || [[ "$text" = http*//*.MP4 ]]; then
-				
-					# 检测到发来视频链接的时候
-					geturl &
-					
-				else
-					echo "$first_name 说：$text"
-					echo "[$(date "+%Y-%m-%d %H:%M:%S")] [用户] $first_name 说：$text" >> $dir/wmbot.log
-				fi
-			fi
+			# 获取用户发送的信息
+			receivemessage &
 		fi
+
+		# 每次循环间隔时间
 		sleep 0.5s
 		ifnew="$newmsg_id"
 	else
